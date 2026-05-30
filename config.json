@@ -2,6 +2,7 @@
   "$schema": null,
   "workDuration": 1,
   "warningDuration": 1,
+  "restDuration": 1,
   "restThreshold": 180,
   "typingSpeedWindow": 5,
   "sound": {

@@ -23,7 +23,8 @@ $keyboardFile = Join-Path $PSScriptRoot "keyboard.ps1"
 # === Default Configuration ===
 $script:workDuration = 50
 $script:warningDuration = 10
-$script:restThreshold = 180
+$script:restDuration = 5         # Rest countdown duration (minutes)
+$script:restThreshold = 180      # Fallback auto-detect (seconds)
 $script:typingSpeedWindow = 5
 $soundEnabled = $true
 $soundFiles = @{
@@ -40,6 +41,7 @@ function Load-Config {
             $cfg = Get-Content $script:configFile -Raw | ConvertFrom-Json
             if ($cfg.workDuration) { $script:workDuration = [int]$cfg.workDuration }
             if ($cfg.warningDuration) { $script:warningDuration = [int]$cfg.warningDuration }
+            if ($cfg.restDuration) { $script:restDuration = [int]$cfg.restDuration }
             if ($cfg.restThreshold) { $script:restThreshold = [int]$cfg.restThreshold }
             if ($cfg.typingSpeedWindow) { $script:typingSpeedWindow = [int]$cfg.typingSpeedWindow }
             if ($cfg.sound) {
@@ -66,6 +68,7 @@ $script:currentPattern = 0
 $script:patternTime = 0.0
 $script:lastSoundState = ""
 $script:restConfirmed = $false
+$script:restCompleted = $false
 $script:stateChanged = $false
 $script:stateChangeTime = [DateTime]::UtcNow
 
@@ -130,11 +133,17 @@ function Update-StateMachine {
         }
 
         "rest" {
-            if ($script:restConfirmed -or $idleSeconds -ge $script:restThreshold) {
-                Set-State "working"
-                $script:restConfirmed = $false
+            $restSeconds = $script:restDuration * 60
+            if ($elapsed -ge $restSeconds -and -not $script:restCompleted) {
+                $script:restCompleted = $true
+                $script:currentPattern = 5
+                $script:redThrowActive = $false
             }
-            $script:currentPattern = 4
+            if ($script:restCompleted) {
+                $script:currentPattern = 5
+            } else {
+                $script:currentPattern = 4
+            }
         }
     }
 }
@@ -231,8 +240,12 @@ function Update-StateMachine {
         </Grid>
 
         <!-- Status Text -->
-        <TextBlock Grid.Row="3" x:Name="StatusText" Text="Working" Foreground="#FFFFFF"
-                   FontSize="10" HorizontalAlignment="Center" Margin="0,4,0,8"/>
+        <StackPanel Grid.Row="3" HorizontalAlignment="Center" Margin="0,4,0,8">
+            <TextBlock x:Name="StatusText" Text="Working" Foreground="#FFFFFF"
+                       FontSize="10" HorizontalAlignment="Center"/>
+            <TextBlock x:Name="CountdownText" Text="50:00" Foreground="#FFFFFF"
+                       FontSize="10" HorizontalAlignment="Center"/>
+        </StackPanel>
     </Grid>
 </Window>
 "@
@@ -245,6 +258,7 @@ $redLed = $window.FindName("RedLed")
 $yellowLed = $window.FindName("YellowLed")
 $greenLed = $window.FindName("GreenLed")
 $statusText = $window.FindName("StatusText")
+$countdownText = $window.FindName("CountdownText")
 
 # Red light figure parts
 $redHead = $window.FindName("RedHead")
@@ -477,6 +491,7 @@ function Handle-StateChange {
         "rest" {
             $script:redThrowActive = $true
             $script:redThrowPhase = 0.0
+            $script:restCompleted = $false
         }
     }
 }
@@ -523,14 +538,15 @@ $timer.Add_Tick({
     $script:lastTickTime = $now
 
     # 1. Poll keyboard
-    Poll-Keyboard | Out-Null
+    $keyPressed = Poll-Keyboard
 
     # 2. Update typing speed
     $typingSpeed = Update-TypingSpeed $script:typingSpeedWindow
 
-    # 3. Check rest shortcut
-    if (Poll-RestShortcut) {
-        $script:restConfirmed = $true
+    # 3. Check wake-up from rest
+    if ($script:restCompleted -and $keyPressed) {
+        Set-State "working"
+        $script:restCompleted = $false
     }
 
     # 4. Handle state changes
@@ -541,12 +557,17 @@ $timer.Add_Tick({
 
     # 6. Update light patterns
     $script:patternTime += ($dt * 1000)
-    $result = Get-PatternResult $script:currentPattern $script:patternTime
-    $redLed.Opacity = [Math]::Max(0.15, [double]$result.Red)
-    if ($script:state -eq "working") {
-        $greenLed.Opacity = [Math]::Max(0.15, [double]$result.Green)
-    } else {
+    if ($script:state -eq "rest" -and $script:restCompleted) {
+        $redLed.Opacity = 1.0
         $greenLed.Opacity = 0.15
+    } else {
+        $result = Get-PatternResult $script:currentPattern $script:patternTime
+        $redLed.Opacity = [Math]::Max(0.15, [double]$result.Red)
+        if ($script:state -eq "working") {
+            $greenLed.Opacity = [Math]::Max(0.15, [double]$result.Green)
+        } else {
+            $greenLed.Opacity = 0.15
+        }
     }
 
     # Yellow light
@@ -576,19 +597,35 @@ $timer.Add_Tick({
             $remaining = [Math]::Max(0, $script:workDuration * 60 - (Get-ElapsedSeconds))
             $mins = [Math]::Floor($remaining / 60)
             $secs = [Math]::Floor($remaining % 60)
-            $statusText.Text = "Working {0:D2}:{1:D2}" -f $mins, $secs
+            $statusText.Text = "Working"
             $statusText.Foreground = "#FFFFFF"
+            $countdownText.Text = "{0:00}:{1:00}" -f $mins, $secs
+            $countdownText.Foreground = "#FFFFFF"
         }
         "warning" {
             $remaining = [Math]::Max(0, $script:warningDuration * 60 - (Get-ElapsedSeconds))
             $mins = [Math]::Floor($remaining / 60)
             $secs = [Math]::Floor($remaining % 60)
-            $statusText.Text = "Break {0:D2}:{1:D2}" -f $mins, $secs
+            $statusText.Text = "Break"
             $statusText.Foreground = "#ffe066"
+            $countdownText.Text = "{0:00}:{1:00}" -f $mins, $secs
+            $countdownText.Foreground = "#ffe066"
         }
         "rest" {
-            $statusText.Text = "Working"
-            $statusText.Foreground = "#ff6b6b"
+            $remaining = [Math]::Max(0, $script:restDuration * 60 - (Get-ElapsedSeconds))
+            $mins = [Math]::Floor($remaining / 60)
+            $secs = [Math]::Floor($remaining % 60)
+            if ($script:restCompleted) {
+                $statusText.Text = "Rest"
+                $statusText.Foreground = "#ff6b6b"
+                $countdownText.Text = "done"
+                $countdownText.Foreground = "#ff6b6b"
+            } else {
+                $statusText.Text = "Rest"
+                $statusText.Foreground = "#ff6b6b"
+                $countdownText.Text = "{0:00}:{1:00}" -f $mins, $secs
+                $countdownText.Foreground = "#ff6b6b"
+            }
         }
     }
 })
