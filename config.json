@@ -1,0 +1,19 @@
+{
+  "$schema": null,
+  "workDuration": 50,
+  "warningDuration": 10,
+  "restThreshold": 180,
+  "typingSpeedWindow": 5,
+  "sound": {
+    "enabled": true,
+    "files": {
+      "working": "C:\\Windows\\Media\\Windows Balloon.wav",
+      "warning": "C:\\Windows\\Media\\Windows Message Nudge.wav",
+      "rest": "C:\\Windows\\Media\\Windows Hardware Fail.wav"
+    }
+  },
+  "window": {
+    "x": 100,
+    "y": 100
+  }
+}
