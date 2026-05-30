@@ -21,10 +21,10 @@ $keyboardFile = Join-Path $PSScriptRoot "keyboard.ps1"
 . $keyboardFile
 
 # === Default Configuration ===
-$script:workDuration = 50        # Work duration (minutes)
-$script:warningDuration = 10     # Warning duration (minutes)
-$script:restThreshold = 180      # Rest detection threshold (seconds)
-$script:typingSpeedWindow = 5    # Typing speed calculation window (seconds)
+$script:workDuration = 50
+$script:warningDuration = 10
+$script:restThreshold = 180
+$script:typingSpeedWindow = 5
 $soundEnabled = $true
 $soundFiles = @{
     working = "C:\Windows\Media\Windows Balloon.wav"
@@ -60,16 +60,21 @@ function Load-Config {
 Load-Config
 
 # === State Machine ===
-$script:state = "working"        # working | warning | rest
+$script:state = "working"
 $script:stateStartTime = [DateTime]::UtcNow
-$script:lastStateChangeTime = [DateTime]::UtcNow
 $script:currentPattern = 0
 $script:patternTime = 0.0
 $script:lastSoundState = ""
 $script:restConfirmed = $false
+$script:stateChanged = $false
+$script:stateChangeTime = [DateTime]::UtcNow
 
 function Get-ElapsedSeconds {
     return ([DateTime]::UtcNow - $script:stateStartTime).TotalSeconds
+}
+
+function Get-StateChangeElapsed {
+    return ([DateTime]::UtcNow - $script:stateChangeTime).TotalSeconds
 }
 
 function Set-State([string]$newState) {
@@ -77,6 +82,8 @@ function Set-State([string]$newState) {
 
     $script:state = $newState
     $script:stateStartTime = [DateTime]::UtcNow
+    $script:stateChangeTime = [DateTime]::UtcNow
+    $script:stateChanged = $true
     $script:patternTime = 0
 
     Play-StateSound $newState
@@ -103,44 +110,31 @@ function Update-StateMachine {
 
     switch ($script:state) {
         "working" {
-            # Check if work duration exceeded
             $workSeconds = $script:workDuration * 60
             if ($elapsed -ge $workSeconds) {
                 Set-State "warning"
             }
-
-            # Select pattern based on typing speed
-            if ($typingSpeed -gt 0.5) {
-                $script:currentPattern = 1  # Green breathing (active)
-            } else {
-                $script:currentPattern = 0  # Green solid
-            }
+            $script:currentPattern = 0
         }
 
         "warning" {
-            # Check if warning duration exceeded
             $warningSeconds = $script:warningDuration * 60
             if ($elapsed -ge $warningSeconds) {
                 Set-State "rest"
             }
-
-            # Warning pattern
             if ($elapsed -gt ($script:warningDuration * 60 * 0.7)) {
-                $script:currentPattern = 3  # Fast flash
+                $script:currentPattern = 3
             } else {
-                $script:currentPattern = 2  # Slow flash
+                $script:currentPattern = 2
             }
         }
 
         "rest" {
-            # Check rest confirmation
             if ($script:restConfirmed -or $idleSeconds -ge $script:restThreshold) {
                 Set-State "working"
                 $script:restConfirmed = $false
             }
-
-            # Rest pattern
-            $script:currentPattern = 4  # Red flash
+            $script:currentPattern = 4
         }
     }
 }
@@ -161,27 +155,55 @@ function Update-StateMachine {
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <!-- Red Light -->
-        <Ellipse Grid.Row="0" x:Name="RedLed" Width="40" Height="40" Margin="0,8,0,0" HorizontalAlignment="Center">
-            <Ellipse.Fill>
-                <RadialGradientBrush>
-                    <GradientStop Color="#ff6b6b" Offset="0.3"/>
-                    <GradientStop Color="#e74c3c" Offset="1"/>
-                </RadialGradientBrush>
-            </Ellipse.Fill>
-        </Ellipse>
+        <!-- Red Light with Sitting Figure (stands up when active) -->
+        <Grid Grid.Row="0" Width="40" Height="40" Margin="0,8,0,0" HorizontalAlignment="Center">
+            <Ellipse x:Name="RedLed" Width="40" Height="40">
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Color="#ff6b6b" Offset="0.3"/>
+                        <GradientStop Color="#e74c3c" Offset="1"/>
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+            <Canvas x:Name="RedCanvas" Width="40" Height="40">
+                <Ellipse x:Name="RedHead" Width="6" Height="6" Canvas.Left="17" Canvas.Top="8" Fill="#2d2d2d"/>
+                <Line x:Name="RedBody" X1="20" Y1="14" X2="20" Y2="24" Stroke="#2d2d2d" StrokeThickness="2"/>
+                <Line x:Name="RedLeftArm" X1="20" Y1="17" X2="12" Y2="14" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="RedRightArm" X1="20" Y1="17" X2="28" Y2="14" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="RedLeftLeg" X1="20" Y1="24" X2="20" Y2="30" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="RedRightLeg" X1="20" Y1="24" X2="20" Y2="30" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="RedSeat" X1="10" Y1="30" X2="30" Y2="30" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Rectangle x:Name="RedMonitor" Width="10" Height="7" Canvas.Left="15" Canvas.Top="22" Stroke="#2d2d2d" StrokeThickness="1" Fill="#2d2d2d" Opacity="1.0"/>
+                <Line x:Name="RedStand" X1="20" Y1="29" X2="20" Y2="30" Stroke="#2d2d2d" StrokeThickness="1"/>
+                <Rectangle x:Name="RedKeyboard" Width="8" Height="2" Canvas.Left="16" Canvas.Top="30" Fill="#2d2d2d" RadiusX="1" RadiusY="1" Opacity="1.0"/>
+            </Canvas>
+        </Grid>
 
-        <!-- Yellow Light -->
-        <Ellipse Grid.Row="1" x:Name="YellowLed" Width="40" Height="40" Margin="0,4,0,0" HorizontalAlignment="Center">
-            <Ellipse.Fill>
-                <RadialGradientBrush>
-                    <GradientStop Color="#ffe066" Offset="0.3"/>
-                    <GradientStop Color="#f1c40f" Offset="1"/>
-                </RadialGradientBrush>
-            </Ellipse.Fill>
-        </Ellipse>
+        <!-- Yellow Light with Sitting Figure (stretches when active) -->
+        <Grid Grid.Row="1" Width="40" Height="40" Margin="0,4,0,0" HorizontalAlignment="Center">
+            <Ellipse x:Name="YellowLed" Width="40" Height="40">
+                <Ellipse.Fill>
+                    <RadialGradientBrush>
+                        <GradientStop Color="#ffe066" Offset="0.3"/>
+                        <GradientStop Color="#f1c40f" Offset="1"/>
+                    </RadialGradientBrush>
+                </Ellipse.Fill>
+            </Ellipse>
+            <Canvas x:Name="YellowCanvas" Width="40" Height="40">
+                <Ellipse x:Name="YellowHead" Width="6" Height="6" Canvas.Left="17" Canvas.Top="8" Fill="#2d2d2d"/>
+                <Line x:Name="YellowBody" X1="20" Y1="14" X2="20" Y2="24" Stroke="#2d2d2d" StrokeThickness="2"/>
+                <Line x:Name="YellowLeftArm" X1="20" Y1="17" X2="12" Y2="14" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="YellowRightArm" X1="20" Y1="17" X2="28" Y2="14" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="YellowLeftLeg" X1="20" Y1="24" X2="20" Y2="30" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="YellowRightLeg" X1="20" Y1="24" X2="20" Y2="30" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="YellowSeat" X1="10" Y1="30" X2="30" Y2="30" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Rectangle Width="10" Height="7" Canvas.Left="15" Canvas.Top="22" Stroke="#2d2d2d" StrokeThickness="1" Fill="#2d2d2d"/>
+                <Line X1="20" Y1="29" X2="20" Y2="30" Stroke="#2d2d2d" StrokeThickness="1"/>
+                <Rectangle Width="8" Height="2" Canvas.Left="16" Canvas.Top="30" Fill="#2d2d2d" RadiusX="1" RadiusY="1"/>
+            </Canvas>
+        </Grid>
 
-        <!-- Green Light with Pedestrian -->
+        <!-- Green Light with Typing Figure and Computer -->
         <Grid Grid.Row="2" Width="40" Height="40" Margin="0,4,0,0" HorizontalAlignment="Center">
             <Ellipse x:Name="GreenLed" Width="40" Height="40">
                 <Ellipse.Fill>
@@ -191,19 +213,20 @@ function Update-StateMachine {
                     </RadialGradientBrush>
                 </Ellipse.Fill>
             </Ellipse>
-            <Canvas x:Name="PedestrianCanvas" Width="40" Height="40" Margin="0">
-                <!-- Head -->
-                <Ellipse x:Name="Head" Width="6" Height="6" Canvas.Left="17" Canvas.Top="4" Fill="#2d2d2d"/>
-                <!-- Body -->
-                <Line x:Name="Body" X1="20" Y1="10" X2="20" Y2="22" Stroke="#2d2d2d" StrokeThickness="2"/>
-                <!-- Left Arm -->
-                <Line x:Name="LeftArm" X1="20" Y1="14" X2="14" Y2="20" Stroke="#2d2d2d" StrokeThickness="1.5"/>
-                <!-- Right Arm -->
-                <Line x:Name="RightArm" X1="20" Y1="14" X2="26" Y2="20" Stroke="#2d2d2d" StrokeThickness="1.5"/>
-                <!-- Left Leg -->
-                <Line x:Name="LeftLeg" X1="20" Y1="22" X2="14" Y2="32" Stroke="#2d2d2d" StrokeThickness="1.5"/>
-                <!-- Right Leg -->
-                <Line x:Name="RightLeg" X1="20" Y1="22" X2="26" Y2="32" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+            <Canvas x:Name="GreenCanvas" Width="40" Height="40">
+                <Ellipse x:Name="GreenHead" Width="6" Height="6" Canvas.Left="17" Canvas.Top="8" Fill="#2d2d2d"/>
+                <Line x:Name="GreenBody" X1="20" Y1="14" X2="20" Y2="24" Stroke="#2d2d2d" StrokeThickness="2"/>
+                <Line x:Name="GreenLeftArm" X1="20" Y1="17" X2="14" Y2="22" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="GreenRightArm" X1="20" Y1="17" X2="26" Y2="22" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="GreenLeftLeg" X1="20" Y1="24" X2="20" Y2="30" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="GreenRightLeg" X1="20" Y1="24" X2="20" Y2="30" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <Line x:Name="GreenSeat" X1="10" Y1="30" X2="30" Y2="30" Stroke="#2d2d2d" StrokeThickness="1.5"/>
+                <!-- Computer Monitor (top edge at hand level Y=22) -->
+                <Rectangle Width="10" Height="7" Canvas.Left="15" Canvas.Top="22" Stroke="#2d2d2d" StrokeThickness="1" Fill="#2d2d2d"/>
+                <!-- Monitor Stand (monitor bottom to seat line) -->
+                <Line X1="20" Y1="29" X2="20" Y2="30" Stroke="#2d2d2d" StrokeThickness="1"/>
+                <!-- Keyboard (centered on X=20, on seat line Y=30) -->
+                <Rectangle x:Name="GreenKeyboard" Width="8" Height="2" Canvas.Left="16" Canvas.Top="30" Fill="#2d2d2d" RadiusX="1" RadiusY="1"/>
             </Canvas>
         </Grid>
 
@@ -221,74 +244,241 @@ $window = [System.Windows.Markup.XamlReader]::Load($reader)
 $redLed = $window.FindName("RedLed")
 $yellowLed = $window.FindName("YellowLed")
 $greenLed = $window.FindName("GreenLed")
-$pedestrianCanvas = $window.FindName("PedestrianCanvas")
 $statusText = $window.FindName("StatusText")
 
-# Pedestrian parts
-$head = $window.FindName("Head")
-$body = $window.FindName("Body")
-$leftArm = $window.FindName("LeftArm")
-$rightArm = $window.FindName("RightArm")
-$leftLeg = $window.FindName("LeftLeg")
-$rightLeg = $window.FindName("RightLeg")
+# Red light figure parts
+$redHead = $window.FindName("RedHead")
+$redBody = $window.FindName("RedBody")
+$redLeftArm = $window.FindName("RedLeftArm")
+$redRightArm = $window.FindName("RedRightArm")
+$redLeftLeg = $window.FindName("RedLeftLeg")
+$redRightLeg = $window.FindName("RedRightLeg")
+$redMonitor = $window.FindName("RedMonitor")
+$redStand = $window.FindName("RedStand")
+$redKeyboard = $window.FindName("RedKeyboard")
+
+# Yellow light figure parts
+$yellowHead = $window.FindName("YellowHead")
+$yellowBody = $window.FindName("YellowBody")
+$yellowLeftArm = $window.FindName("YellowLeftArm")
+$yellowRightArm = $window.FindName("YellowRightArm")
+$yellowLeftLeg = $window.FindName("YellowLeftLeg")
+$yellowRightLeg = $window.FindName("YellowRightLeg")
+$yellowSeat = $window.FindName("YellowSeat")
+
+# Green light figure parts
+$greenHead = $window.FindName("GreenHead")
+$greenBody = $window.FindName("GreenBody")
+$greenLeftArm = $window.FindName("GreenLeftArm")
+$greenRightArm = $window.FindName("GreenRightArm")
+$greenLeftLeg = $window.FindName("GreenLeftLeg")
+$greenRightLeg = $window.FindName("GreenRightLeg")
 
 # Initialize LED states
 $redLed.Opacity = 0.15
 $yellowLed.Opacity = 0.15
 $greenLed.Opacity = 1.0
 
-# === Pedestrian Animation ===
-$script:pedestrianPhase = 0.0
-$script:pedestrianSpeed = 0.0  # Current animation speed (0-2)
-$script:targetSpeed = 0.0      # Target speed
+# === Animation State ===
+$script:greenTypingPhase = 0.0
+$script:greenTypingSpeed = 0.0
+$script:greenTargetSpeed = 0.0
 
-function Update-PedestrianAnimation([double]$dt) {
-    # Smooth transition to target speed
-    $speedDiff = $script:targetSpeed - $script:pedestrianSpeed
-    $script:pedestrianSpeed += $speedDiff * [Math]::Min(1.0, $dt * 3.0)
+$script:yellowStretchPhase = 0.0
+$script:yellowStretchActive = $false
 
-    # Update animation phase
-    if ($script:pedestrianSpeed -gt 0.01) {
-        $script:pedestrianPhase += $dt * $script:pedestrianSpeed * 4.0
-        $script:pedestrianPhase = $script:pedestrianPhase % (2 * [Math]::PI)
+$script:redThrowPhase = 0.0
+$script:redThrowActive = $false
+
+# === Green Light: Typing Animation ===
+function Update-GreenTyping([double]$dt) {
+    # Smooth speed transition
+    $speedDiff = $script:greenTargetSpeed - $script:greenTypingSpeed
+    $script:greenTypingSpeed += $speedDiff * [Math]::Min(1.0, $dt * 3.0)
+
+    # Update typing phase
+    if ($script:greenTypingSpeed -gt 0.01) {
+        $script:greenTypingPhase += $dt * $script:greenTypingSpeed * 6.0
+        $script:greenTypingPhase = $script:greenTypingPhase % (2 * [Math]::PI)
     }
 
-    # Center point for pedestrian in 40x40 green light
-    $cx = 20; $cy = 22
+    # Base positions for sitting pose
+    $headY = 8
+    $bodyY1 = 14
+    $bodyY2 = 24
+    $armBaseY = 22
 
-    # Calculate leg swing angle (radians)
-    $legSwing = 0.35 * $script:pedestrianSpeed
-    $leftAngle = [Math]::Sin($script:pedestrianPhase) * $legSwing
-    $rightAngle = [Math]::Sin($script:pedestrianPhase + [Math]::PI) * $legSwing
+    # Typing animation: arms move up and down alternately
+    $armAmplitude = 3.0 * $script:greenTypingSpeed
 
-    # Calculate arm swing angle
-    $armSwing = 0.3 * $script:pedestrianSpeed
-    $leftArmAngle = [Math]::Sin($script:pedestrianPhase + [Math]::PI) * $armSwing
-    $rightArmAngle = [Math]::Sin($script:pedestrianPhase) * $armSwing
+    # Left arm: strikes keyboard
+    $leftArmOffset = [Math]::Sin($script:greenTypingPhase) * $armAmplitude
+    $greenLeftArm.X2 = 14
+    $greenLeftArm.Y2 = $armBaseY - $leftArmOffset
 
-    # Update left leg position
-    $leftLeg.X2 = $cx + [Math]::Sin($leftAngle) * 10
-    $leftLeg.Y2 = $cy + [Math]::Cos($leftAngle) * 10
+    # Right arm: strikes keyboard (opposite phase)
+    $rightArmOffset = [Math]::Sin($script:greenTypingPhase + [Math]::PI) * $armAmplitude
+    $greenRightArm.X2 = 26
+    $greenRightArm.Y2 = $armBaseY - $rightArmOffset
 
-    # Update right leg position
-    $rightLeg.X2 = $cx + [Math]::Sin($rightAngle) * 10
-    $rightLeg.Y2 = $cy + [Math]::Cos($rightAngle) * 10
+    # Head bob slightly while typing
+    $headBob = [Math]::Abs([Math]::Sin($script:greenTypingPhase)) * 0.5 * $script:greenTypingSpeed
+    $greenHead.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double]($headY + $headBob))
 
-    # Update left arm position
-    $leftArm.X2 = $cx + [Math]::Sin($leftArmAngle) * 8
-    $leftArm.Y2 = 14 + [Math]::Cos($leftArmAngle) * 8
-
-    # Update right arm position
-    $rightArm.X2 = $cx + [Math]::Sin($rightArmAngle) * 8
-    $rightArm.Y2 = 14 + [Math]::Cos($rightArmAngle) * 8
-
-    # Head bob
-    $headBob = [Math]::Abs([Math]::Sin($script:pedestrianPhase * 2)) * 1.5 * $script:pedestrianSpeed
-    $head.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double](4 + $headBob))
+    # Body leans forward slightly when typing fast
+    $bodyLean = $script:greenTypingSpeed * 0.5
+    $greenBody.Y1 = $bodyY1 + $bodyLean
 }
 
-function Set-PedestrianSpeed([double]$typingSpeed) {
-    $script:targetSpeed = Get-AnimationSpeed $typingSpeed
+function Set-GreenTypingSpeed([double]$typingSpeed) {
+    $script:greenTargetSpeed = Get-AnimationSpeed $typingSpeed
+}
+
+# === Yellow Light: Sitting Stretch Animation ===
+function Update-YellowStretch([double]$dt) {
+    if (-not $script:yellowStretchActive) {
+        # Idle sitting pose - legs together, arms down
+        $yellowHead.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double]8)
+        $yellowBody.Y1 = 14; $yellowBody.Y2 = 24
+        $yellowLeftArm.X2 = 16; $yellowLeftArm.Y2 = 20
+        $yellowRightArm.X2 = 24; $yellowRightArm.Y2 = 20
+        $yellowLeftLeg.X2 = 20; $yellowLeftLeg.Y2 = 30
+        $yellowRightLeg.X2 = 20; $yellowRightLeg.Y2 = 30
+        return
+    }
+
+    $script:yellowStretchPhase += $dt
+    $progress = [Math]::Min(1.0, $script:yellowStretchPhase / 2.0)
+
+    # Stretch animation: arms raise up, body straightens slightly
+    if ($progress -lt 0.5) {
+        # Phase 1: Raise arms
+        $p = $progress * 2
+        $armY = 20 - ($p * 14)  # Arms go from 20 to 6
+        $yellowLeftArm.X2 = 16 - ($p * 8)  # Arms spread wider
+        $yellowLeftArm.Y2 = $armY
+        $yellowRightArm.X2 = 24 + ($p * 8)
+        $yellowRightArm.Y2 = $armY
+        # Body leans back slightly
+        $yellowBody.Y1 = 14 - ($p * 2)
+        # Head tilts up
+        $yellowHead.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double](8 - $p * 3))
+    } else {
+        # Phase 2: Hold stretch, slight relaxation
+        $p = ($progress - 0.5) * 2
+        $armY = 6 + ($p * 2)  # Arms relax slightly
+        $yellowLeftArm.X2 = 8 + ($p * 4)
+        $yellowLeftArm.Y2 = $armY
+        $yellowRightArm.X2 = 32 - ($p * 4)
+        $yellowRightArm.Y2 = $armY
+        $yellowBody.Y1 = 12 + $p
+        $yellowHead.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double](5 + $p))
+    }
+
+    # Loop the animation
+    if ($script:yellowStretchPhase -ge 2.5) {
+        $script:yellowStretchPhase = 0.0
+    }
+}
+
+# === Red Light: Throw Computer Animation ===
+function Update-RedThrow([double]$dt) {
+    if (-not $script:redThrowActive) {
+        Reset-RedIdle
+        return
+    }
+
+    $script:redThrowPhase += $dt
+    $cyc = $script:redThrowPhase % 2.0
+
+    if ($cyc -lt 0.6) {
+        # Phase 1: Stand up, right arm reaches toward monitor
+        $p = $cyc / 0.6
+        $headY = 8 - ($p * 3)
+        $bodyY1 = 14 - ($p * 3)
+        $bodyY2 = 24 - ($p * 2)
+        $redHead.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double]$headY)
+        $redBody.Y1 = $bodyY1; $redBody.Y2 = $bodyY2
+        $redLeftLeg.X2 = 20 - ($p * 4); $redLeftLeg.Y2 = 30 + ($p * 2)
+        $redRightLeg.X2 = 20 + ($p * 4); $redRightLeg.Y2 = 30 + ($p * 2)
+        $redLeftArm.X2 = 16; $redLeftArm.Y2 = 20
+        $redRightArm.X2 = 24 - ($p * 10); $redRightArm.Y2 = 20 + ($p * 5)
+        $redMonitor.Opacity = 1.0
+        $redMonitor.SetValue([System.Windows.Controls.Canvas]::LeftProperty, [double]15)
+        $redMonitor.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double]22)
+        $redStand.Opacity = 1.0
+        $redKeyboard.Opacity = 1.0
+    } elseif ($cyc -lt 1.1) {
+        # Phase 2: Grab monitor, pull up
+        $p = ($cyc - 0.6) / 0.5
+        $redHead.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double](5 - $p * 2))
+        $redBody.Y1 = 11 - ($p * 2); $redBody.Y2 = 22
+        $redRightArm.X2 = 14 - ($p * 2); $redRightArm.Y2 = 25 - ($p * 10)
+        $redLeftArm.X2 = 16; $redLeftArm.Y2 = 20
+        $monitorX = 15 + ($p * 5); $monitorY = 22 - ($p * 10)
+        $redMonitor.SetValue([System.Windows.Controls.Canvas]::LeftProperty, [double]$monitorX)
+        $redMonitor.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double]$monitorY)
+        $redMonitor.Opacity = 1.0
+        $redStand.Opacity = 1.0 - $p
+        $redKeyboard.Opacity = 1.0 - $p
+    } elseif ($cyc -lt 1.6) {
+        # Phase 3: Throw diagonally - arm swings right-up, monitor flies
+        $p = ($cyc - 1.1) / 0.5
+        $redRightArm.X2 = 12 + ($p * 20); $redRightArm.Y2 = 15 - ($p * 15)
+        $redLeftArm.X2 = 16; $redLeftArm.Y2 = 20
+        $redBody.Y1 = 9 - ($p * 3); $redBody.Y2 = 22
+        $monitorX = 20 + ($p * 25); $monitorY = 12 - ($p * 15)
+        $redMonitor.SetValue([System.Windows.Controls.Canvas]::LeftProperty, [double]$monitorX)
+        $redMonitor.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double]$monitorY)
+        $redMonitor.Opacity = 1.0 - ($p * 0.7)
+        $redStand.Opacity = 0.0
+        $redKeyboard.Opacity = 0.0
+    } else {
+        # Phase 4: Frozen throw pose, then instant reset
+        $redRightArm.X2 = 32; $redRightArm.Y2 = 0
+        $redLeftArm.X2 = 16; $redLeftArm.Y2 = 20
+        $redBody.Y1 = 6; $redBody.Y2 = 22
+        $redMonitor.Opacity = 0.0
+        $redStand.Opacity = 0.0
+        $redKeyboard.Opacity = 0.0
+        if ($cyc -ge 1.9) {
+            Reset-RedIdle
+        }
+    }
+}
+
+function Reset-RedIdle {
+    $redHead.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double]8)
+    $redBody.Y1 = 14; $redBody.Y2 = 24
+    $redLeftArm.X2 = 16; $redLeftArm.Y2 = 20
+    $redRightArm.X2 = 24; $redRightArm.Y2 = 20
+    $redLeftLeg.X2 = 20; $redLeftLeg.Y2 = 30
+    $redRightLeg.X2 = 20; $redRightLeg.Y2 = 30
+    $redMonitor.Opacity = 1.0
+    $redMonitor.SetValue([System.Windows.Controls.Canvas]::LeftProperty, [double]15)
+    $redMonitor.SetValue([System.Windows.Controls.Canvas]::TopProperty, [double]22)
+    $redStand.Opacity = 1.0
+    $redKeyboard.Opacity = 1.0
+}
+
+# === State Change Detection ===
+function Handle-StateChange {
+    if (-not $script:stateChanged) { return }
+    $script:stateChanged = $false
+
+    $script:yellowStretchActive = $false
+    $script:redThrowActive = $false
+
+    switch ($script:state) {
+        "warning" {
+            $script:yellowStretchActive = $true
+            $script:yellowStretchPhase = 0.0
+        }
+        "rest" {
+            $script:redThrowActive = $true
+            $script:redThrowPhase = 0.0
+        }
+    }
 }
 
 # === Window Drag and Menu ===
@@ -324,7 +514,7 @@ $window.ContextMenu = $menu
 
 # === Main Timer ===
 $timer = New-Object System.Windows.Threading.DispatcherTimer
-$timer.Interval = [TimeSpan]::FromMilliseconds(16)  # ~60fps
+$timer.Interval = [TimeSpan]::FromMilliseconds(16)
 $script:lastTickTime = [DateTime]::UtcNow
 
 $timer.Add_Tick({
@@ -343,27 +533,44 @@ $timer.Add_Tick({
         $script:restConfirmed = $true
     }
 
-    # 4. Update state machine
+    # 4. Handle state changes
+    Handle-StateChange
+
+    # 5. Update state machine
     Update-StateMachine
 
-    # 5. Update light pattern
+    # 6. Update light patterns
     $script:patternTime += ($dt * 1000)
     $result = Get-PatternResult $script:currentPattern $script:patternTime
     $redLed.Opacity = [Math]::Max(0.15, [double]$result.Red)
-    $greenLed.Opacity = [Math]::Max(0.15, [double]$result.Green)
+    if ($script:state -eq "working") {
+        $greenLed.Opacity = [Math]::Max(0.15, [double]$result.Green)
+    } else {
+        $greenLed.Opacity = 0.15
+    }
 
-    # Yellow light state (show during warning phase)
+    # Yellow light
     if ($script:state -eq "warning") {
         $yellowLed.Opacity = if (($script:patternTime % 800) -lt 400) { 1.0 } else { 0.3 }
     } else {
         $yellowLed.Opacity = 0.15
     }
 
-    # 6. Update pedestrian animation
-    Set-PedestrianSpeed $typingSpeed
-    Update-PedestrianAnimation $dt
+    # 7. Update animations based on state
+    switch ($script:state) {
+        "working" {
+            Set-GreenTypingSpeed $typingSpeed
+            Update-GreenTyping $dt
+        }
+        "warning" {
+            Update-YellowStretch $dt
+        }
+        "rest" {
+            Update-RedThrow $dt
+        }
+    }
 
-    # 7. Update status text
+    # 8. Update status text
     switch ($script:state) {
         "working" {
             $remaining = [Math]::Max(0, $script:workDuration * 60 - (Get-ElapsedSeconds))
@@ -380,7 +587,7 @@ $timer.Add_Tick({
             $statusText.Foreground = "#ffe066"
         }
         "rest" {
-            $statusText.Text = "Rest! Ctrl+Alt+R"
+            $statusText.Text = "Working"
             $statusText.Foreground = "#ff6b6b"
         }
     }
